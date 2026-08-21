@@ -251,6 +251,20 @@ body {
   margin-left: auto;
 }
 
+.source-link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.source-link:hover {
+  color: var(--text);
+}
+
 /* ---------- Status ---------- */
 .status {
   display: flex;
