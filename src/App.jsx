@@ -62,6 +62,7 @@ export default function App() {
   const abortRef = useRef(null)
   const mapRef = useRef(null)
   const [mapSize, setMapSize] = useState({ w: 0, h: 0 })
+  const [isMobile, setIsMobile] = useState(false)
 
   const cat = CATEGORIES.find((c) => c.id === category)
 
@@ -71,7 +72,20 @@ export default function App() {
     if (!el) return
     const update = () => {
       const w = el.clientWidth
-      const h = Math.max(520, Math.min(w * 0.58, window.innerHeight - 220))
+      const mobile = window.innerWidth < 768
+      let h
+      if (mobile) {
+        // Size the height off the tile COUNT so each tile is readable — aim for
+        // ~3 tiles across. The treemap fully fills the rectangle, so
+        // average tile area = w*h/count; solve for h given a target tile size.
+        const count = Math.max(stories.length, 1)
+        const perRow = 3
+        const tile = w / perRow
+        h = (tile * tile * count) / w
+      } else {
+        h = Math.max(520, Math.min(w * 0.58, window.innerHeight - 220))
+      }
+      setIsMobile(mobile)
       setMapSize({ w, h })
     }
     update()
@@ -82,7 +96,7 @@ export default function App() {
       ro.disconnect()
       window.removeEventListener('resize', update)
     }
-  }, [loading])
+  }, [loading, stories.length])
 
   useEffect(() => {
     abortRef.current?.abort()
@@ -131,7 +145,9 @@ export default function App() {
     if (!mapSize.w || !mapSize.h || stories.length === 0) return []
     const EXP = 0.82 // closer to linear = more dramatic size difference
     const scaled = (v) => Math.pow(Math.max(v, 0), EXP)
-    const floor = scaled(maxValue) * 0.035
+    // Bigger floor on mobile lifts the coldest tiles to a title-friendly size;
+    // desktop keeps the small floor for a stronger hot/cold size contrast.
+    const floor = scaled(maxValue) * (isMobile ? 0.16 : 0.035)
     const data = stories.map((s, i) => ({
       id: s.id,
       value: s[metric] || 0,
@@ -139,7 +155,7 @@ export default function App() {
       index: i,
     }))
     return squarifiedTreemap(data, mapSize.w, mapSize.h)
-  }, [stories, metric, maxValue, mapSize])
+  }, [stories, metric, maxValue, mapSize, isMobile])
 
   return (
     <div className="app">
@@ -216,7 +232,9 @@ export default function App() {
                 const t = norm(v)
                 const bg = heatColor(t)
                 const dark = t > 0.62
-                const showTitle = tile.w > 62 && tile.h > 40
+                // On mobile every tile shows its title; desktop keeps the
+                // size threshold so tiny cold tiles stay clean.
+                const showTitle = isMobile || (tile.w > 62 && tile.h > 40)
                 const showValue = tile.w > 36 && tile.h > 26
                 // Title grows slightly with tile size; larger tiles = bigger text.
                 const titleSize = Math.max(
