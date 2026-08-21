@@ -37,3 +37,4 @@ node_modules/.vite/
 *.sln
 *.sw?
 Thumbs.db
+.claude
