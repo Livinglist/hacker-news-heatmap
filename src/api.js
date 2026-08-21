@@ -9,8 +9,14 @@ export const CATEGORIES = [
   { id: 'show', label: 'show', endpoint: 'showstories' },
 ]
 
-async function getJSON(url, signal) {
-  const res = await fetch(url, { signal })
+// Fetch JSON with a hard timeout so a stalled request can never hang forever
+// (which would otherwise leave the loading indicator stuck). The caller's abort
+// signal and the timeout are combined; whichever fires first wins.
+async function getJSON(url, signal, timeoutMs = 12000) {
+  const signals = [AbortSignal.timeout(timeoutMs)]
+  if (signal) signals.push(signal)
+  const combined = signals.length > 1 ? AbortSignal.any(signals) : signals[0]
+  const res = await fetch(url, { signal: combined })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
   return res.json()
 }

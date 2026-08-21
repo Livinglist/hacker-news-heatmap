@@ -10,8 +10,9 @@ const METRICS = [
   { id: 'descendants', label: 'Comments' },
 ]
 
-// Map a normalized value [0,1] to a heat color (cool navy -> HN orange -> hot yellow).
-function heatColor(t) {
+// Map a normalized value [0,1] to a heat color (cool navy -> HN orange -> hot
+// yellow), returned as an [r,g,b] array.
+function heatRGB(t) {
   const stops = [
     [13, 17, 38],     // deep navy
     [40, 30, 90],     // indigo
@@ -27,9 +28,16 @@ function heatColor(t) {
   const f = pos - i
   const a = stops[i]
   const b = stops[Math.min(i + 1, stops.length - 1)]
-  const c = a.map((v, k) => Math.round(v + (b[k] - v) * f))
+  return a.map((v, k) => Math.round(v + (b[k] - v) * f))
+}
+
+function heatColor(t) {
+  const c = heatRGB(t)
   return `rgb(${c[0]}, ${c[1]}, ${c[2]})`
 }
+
+// Every tile uses the same black text.
+const TILE_TEXT = '#1a1a1a'
 
 function timeAgo(unixSeconds) {
   if (!unixSeconds) return ''
@@ -51,6 +59,63 @@ function domainOf(url) {
   }
 }
 
+// Renders text at its target size (`max`), shrinking only if the full title
+// wouldn't otherwise fit the box. It never grows past `max`, so a short title
+// is not enlarged just because it has fewer characters — size tracks the tile
+// (i.e. the post's points/comments), not the title length.
+function FitText({ text, min = 6.5, max = 22 }) {
+  const boxRef = useRef(null)
+  const textRef = useRef(null)
+
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    const el = textRef.current
+    if (!box || !el) return
+
+    const fit = () => {
+      const availW = box.clientWidth
+      const availH = box.clientHeight
+      if (!availW || !availH) return
+      const fitsAt = (size) => {
+        el.style.fontSize = `${size}px`
+        return el.scrollWidth <= availW + 0.5 && el.scrollHeight <= availH + 0.5
+      }
+      // Target size first: if the whole title fits at `max`, keep it there.
+      if (fitsAt(max)) {
+        el.style.fontSize = `${max}px`
+        return
+      }
+      // Otherwise shrink just enough to fit.
+      let lo = min
+      let hi = max
+      let best = min
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2
+        if (fitsAt(mid)) {
+          best = mid
+          lo = mid
+        } else {
+          hi = mid
+        }
+      }
+      el.style.fontSize = `${best}px`
+    }
+
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [text, min, max])
+
+  return (
+    <span className="tile-title" ref={boxRef}>
+      <span className="fit-inner" ref={textRef}>
+        {text}
+      </span>
+    </span>
+  )
+}
+
 export default function App() {
   const [category, setCategory] = useState('top')
   const [metric, setMetric] = useState('score')
@@ -59,7 +124,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [hover, setHover] = useState(null) // { story, x, y }
-  const abortRef = useRef(null)
+  const reqIdRef = useRef(0)
   const mapRef = useRef(null)
   const [mapSize, setMapSize] = useState({ w: 0, h: 0 })
   const [isMobile, setIsMobile] = useState(false)
@@ -83,7 +148,12 @@ export default function App() {
         const tile = w / perRow
         h = (tile * tile * count) / w
       } else {
-        h = Math.max(520, Math.min(w * 0.58, window.innerHeight - 220))
+        // Desktop: fill the remaining viewport height below the treemap's top,
+        // so the heatmap reaches the bottom of the window. Uses the container's
+        // document offset (scroll-independent) and re-runs on every resize.
+        const docTop = el.getBoundingClientRect().top + window.scrollY
+        // Reserve space below for the legend + a small gap.
+        h = Math.max(360, window.innerHeight - docTop - 64)
       }
       setIsMobile(mobile)
       setMapSize({ w, h })
@@ -99,9 +169,13 @@ export default function App() {
   }, [loading, stories.length])
 
   useEffect(() => {
-    abortRef.current?.abort()
+    // Each run gets a monotonic id; only the LATEST request may touch state.
+    // This is robust against any abort/resolve interleaving when switching
+    // categories quickly — a superseded request can neither overwrite the data
+    // nor leave the loading indicator stuck.
+    const reqId = ++reqIdRef.current
+    const isCurrent = () => reqId === reqIdRef.current
     const controller = new AbortController()
-    abortRef.current = controller
     setLoading(true)
     setError(null)
     setStories([])
@@ -110,14 +184,17 @@ export default function App() {
     fetchTopStories(cat.endpoint, {
       count: 100,
       signal: controller.signal,
-      onProgress: (done, total) => setProgress({ done, total }),
+      onProgress: (done, total) => {
+        if (isCurrent()) setProgress({ done, total })
+      },
     })
       .then((items) => {
+        if (!isCurrent()) return
         setStories(items)
         setLoading(false)
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return
+        if (!isCurrent() || err.name === 'AbortError') return
         setError(err.message || 'Failed to load')
         setLoading(false)
       })
@@ -231,19 +308,15 @@ export default function App() {
                 const v = tile.value
                 const t = norm(v)
                 const bg = heatColor(t)
-                const dark = t > 0.62
+                const dark = t > 0.5
                 // On mobile every tile shows its title; desktop keeps the
                 // size threshold so tiny cold tiles stay clean.
                 const showTitle = isMobile || (tile.w > 62 && tile.h > 40)
                 const showValue = tile.w > 36 && tile.h > 26
-                // Title grows slightly with tile size; larger tiles = bigger text.
-                const titleSize = Math.max(
-                  11,
-                  Math.min(22, Math.round(11 + (Math.min(tile.w, tile.h) - 60) / 11)),
-                )
-                const lineHeightPx = Math.round(titleSize * 1.2)
-                // Fit as many title lines as the tile height allows.
-                const titleLines = Math.max(1, Math.floor((tile.h - 24) / lineHeightPx))
+                // Target title size scales with the TILE size (i.e. the post's
+                // score/comments), capped — so hotter posts get bigger titles,
+                // but a short title never balloons past this cap.
+                const titleCap = Math.max(9, Math.min(24, Math.sqrt(tile.w * tile.h) * 0.13))
                 return (
                   <a
                     key={s.id}
@@ -267,19 +340,17 @@ export default function App() {
                     }
                   >
                     <span className="tile-rank">{tile.index + 1}</span>
-                    {showTitle && (
-                      <span
-                        className="tile-title"
-                        style={{
-                          WebkitLineClamp: titleLines,
-                          fontSize: titleSize,
-                          lineHeight: `${lineHeightPx}px`,
-                        }}
-                      >
-                        {s.title}
+                    {showTitle && <FitText key={s.id} text={s.title || ''} max={titleCap} />}
+                    {showValue && (
+                      <span className="tile-value">
+                        {metric === 'score' ? (
+                          <span className="tile-up">▲</span>
+                        ) : (
+                          <span className="material-symbols-outlined">mode_comment</span>
+                        )}
+                        {v}
                       </span>
                     )}
-                    {showValue && <span className="tile-value">{v}</span>}
                   </a>
                 )
               })}
@@ -289,10 +360,6 @@ export default function App() {
               <span className="legend-label">{minValue}</span>
               <div className="legend-bar" />
               <span className="legend-label">{maxValue}</span>
-              <span className="legend-count">
-                {stories.length} posts · color relative to this category ·{' '}
-                {metric === 'score' ? 'points' : 'comments'}
-              </span>
             </div>
           </>
         )}
@@ -311,8 +378,14 @@ export default function App() {
           </div>
           <div className="tt-meta">
             <span className="tt-score">▲ {hover.story.score || 0} points</span>
-            <span>💬 {hover.story.descendants || 0}</span>
-            <span>{timeAgo(hover.story.time)}</span>
+            <span>
+              <span className="material-symbols-outlined">mode_comment</span>
+              {hover.story.descendants || 0}
+            </span>
+            <span>
+              <span className="material-symbols-outlined">schedule</span>
+              {timeAgo(hover.story.time)}
+            </span>
           </div>
           <div className="tt-sub">
             by {hover.story.by}

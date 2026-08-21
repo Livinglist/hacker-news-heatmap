@@ -182,15 +182,25 @@ body {
   line-height: 1.2;
 }
 
+/* Box the title fills; FitText sizes the inner text to fit exactly. */
 .tile-title {
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.25;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
   margin-top: 2px;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+}
+
+.fit-inner {
+  display: block;
+  width: 100%;
+  font-weight: 600;
+  line-height: 1.12;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .tile-value {
@@ -198,6 +208,17 @@ body {
   font-weight: 800;
   line-height: 1.1;
   margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tile-up {
+  font-size: 0.85em;
+}
+
+.tile-value .material-symbols-outlined {
+  font-size: 13px;
 }
 
 /* ---------- Legend ---------- */
@@ -265,6 +286,7 @@ body {
   position: fixed;
   z-index: 50;
   width: 320px;
+  max-width: calc(100vw - 24px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -286,10 +308,34 @@ body {
 
 .tt-meta {
   display: flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  align-items: center;
   gap: 12px;
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 3px;
+}
+
+.tt-meta > span {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+  font-size: 15px;
+  line-height: 1;
+  /* Keep the ligature name hidden if the icon font hasn't loaded yet. */
+  overflow: hidden;
+  max-width: 1em;
+}
+
+.tt-score .material-symbols-outlined {
+  color: var(--hn-orange);
 }
 
 .tt-score {
@@ -303,9 +349,6 @@ body {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 760px) {
-  .metric-toggle {
-    margin-left: 0;
-  }
   .brand-name {
     display: none;
   }
